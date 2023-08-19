@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import socket
+from urllib import parse
+from urllib.parse import urlparse as parse
+
+PORT = 21
+USER = 'anonymous'
+host = 'ftp://ftp.3700.network'
+condition = True
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+dataSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+
+# function to send type, mode and Stru command
+def send():
+     stru =  ("STRU F" + "\r\n").encode("utf-8")
+     type =  ("TYPE I" + "\r\n").encode("utf-8")
+     mode =  ("MODE S" + "\r\n").encode("utf-8") 
+
+     print("sending type")
+     sock.send(type)
+     print(sock.recv(4096))
+
+     print("sending mode")
+     sock.send(mode)
+     print(sock.recv(4096))
+
+     print("sending stru command")
+     sock.send(stru)
+     print(sock.recv(1024))
+
+
+#function to print out the directory listing from the FTP server at the given URL
+def listFunc(path):
+     #sending the LIST message to server
+     print("Sending list message to server")
+     lists = ("LIST " + path + '\r\n').encode("utf-8")
+     sock.send(lists)
+
+     print(sock.recv(1024).decode())
+     print(dataSock.recv(1024))
+     print(sock.recv(1024).decode())
+
+#function to delete the file on the FTP server at the given URL
+def deleteFunc(path):
+     delete = ("DELE " + path + '\r\n').encode("utf-8")
+     sock.send(delete)
+
+     print(sock.recv(1024).decode())
+
+#function to copy the file from local machine to server
+def uploadFile(path, path2):
+     send()
+
+     print("opening file")
+     file = open(path2, "rb")
+     
+     store = ("STOR " + path + "\r\n").encode("utf-8")
+     sock.send(store)
+     print(sock.recv(1024))
+     
+     # sending data to the server
+     data = file.read(1024)
+     while (data):
+          dataSock.send(data)
+          data = file.read(1024)
+
+     dataSock.close()
+     print(sock.recv(1042).decode())     
+
+#function to copy the file from server to local machine 
+def downloadFile(path, path2):
+     send()
+    
+     download = ("RETR " + path + "\r\n").encode("utf-8")
+     sock.send(download)
+     
+     filename = (os.path.basename(path))
+     
+     print(sock.recv(1024))
+
+     #open a file and write the data sent by the server
+     if(path2 != ""):
+          ("print here")
+          with open(path2, "wb") as file:      
+               while (True):
+                    data = dataSock.recv(1024)   
+                    if not data:
+                         break
+                    file.write(data)
+     else:
+          with open(filename , "w") as file:      
+               while (True):
+                    data = dataSock.recv(1024)   
+                    if not data:
+                         break
+                    file.write(data)
+
+     dataSock.close()
+     print(sock.recv(1024))
+
+#function to move a file from the client to the server 
+def moveFileFromClient(path, path2):
+     send()
+
+     file = open(path2, "rb")
+     filename = (os.path.basename(path2))
+     
+     store = ("STOR " + path + "\r\n").encode("utf-8")
+
+     sock.send(store)
+     print(sock.recv(1024))
+
+     #sending the data to the server
+     data = file.read(1024)
+     while (data):
+          dataSock.send(data)
+          data = file.read(1024)
+     
+     #deleting the file from the local machine
+     os.remove(filename)
+     dataSock.close()
+     print(sock.recv(1024))
+     print("upload complete") 
+
+#function to move a file from the server to the client  
+def moveFileFromServer(path, path2):
+     send()
+
+     download = ("RETR " + path + "\r\n").encode("utf-8")
+     sock.send(download)
+
+     filename = (os.path.basename(path))
+     print(sock.recv(1024))
+
+    #open the file and write in it the data sent by the server
+     if(path2 != ""):
+          ("print here")
+          with open(path2, "w") as file:      
+               while (True):
+                    data = dataSock.recv(1024)   
+                    if not data:
+                         break
+                    file.write(data.decode("utf-8"))
+     else:
+          with open(filename , "w") as file:      
+               while (True):
+                    data = dataSock.recv(1024)   
+                    if not data:
+                         break
+                    file.write(data.decode("utf-8"))
+    
+     #deleting the file on the server
+     deleteFunc(path)
+     
+     print(sock.recv(1042).decode())
+     dataSock.close()
+
+# function to create a new directory on the FTP server at the given URL
+def makeDirectory(path):
+     directory = ("MKD " + path + "\r\n").encode("utf-8")
+     sock.send(directory)
+
+     print(sock.recv(1042).decode())
+
+# function to delete the directory on the FTP server at the given URL
+def deleteDirectory(path):
+     directory = ("RMD " + path + "\r\n").encode("utf-8")
+     sock.send(directory)
+
+     print(sock.recv(1042).decode())
+
+#Ask the FTP server to close the connection.
+def quitFunc():
+    quit = ("QUIT " + "\r\n").encode("utf-8")
+    sock.send(quit)
+    sock.recv(1024)
+    sock.close()
+    print("Server connection ended")
+    return
+
+#function to open the data channel
+def sendPASV():
+     pasv = ("PASV" + "\r\n").encode()
+     print("sending pasv")
+     sock.send(pasv)
+     answer = sock.recv(4096).decode()
+     print(answer)
+
+     s = answer.find("(")
+     e = answer.find(")")
+     t = answer[s+1 : e].split(',')
+     dataPort = (int(t[4])<<8) + int(t[5])
+
+     #IP address for opening data channel
+     IP = ".".join(t[:4])
+          
+     #connecting to data channel
+     dataSock.connect((IP, dataPort))
+
+
+def main():
+     parser = argparse.ArgumentParser()
+     parser.add_argument('command', type = str)
+     parser.add_argument("params", help="Parameters for the given operation. Will be one or two paths and/or URLs.", type=str,nargs='+')
+     args = parser.parse_args()
+
+     command = args.command
+     user = ''
+     password = ''
+     hostname = ''
+     port =''
+     path = ''
+     path2 =''
+     
+     #parsing params given by the user
+     if(len(args.params) == 1):
+          print("here")
+          if(args.params[0]):
+               param1 = args.params[0]
+               
+               u = parse(param1)
+               user = u.username
+               password = u.password
+               port = u.port
+
+               s = str(param1).split("@")[-1:]
+               a = s[0].replace("ftp://", "")
+               hostname = a.split("/")[0]
+
+               path = a.replace(hostname, "")
+               print(path)
+               print(path2)
+     
+     #if two agruments given
+     if(len(args.params) == 2):
+          if parse(args.params[0]).scheme:
+               param1 = args.params[0]
+                    
+               u = parse(param1)
+               user = u.username
+               password = u.password
+               port = u.port
+
+               s = str(param1).split("@")[-1:]
+               a = s[0].replace("ftp://", "")
+               hostname = a.split("/")[0]
+
+               path = a.replace(hostname, "")
+               
+               param2 = args.params[1]
+               path2 = param2
+               print(path + "here")
+               print(path2 + "here")
+     
+
+          if parse(args.params[1]).scheme:
+               param2 = args.params[1]
+                    
+               u = parse(param2)
+               user = u.username
+               password = u.password
+               port = u.port
+
+               s = str(param2).split("@")[-1:]
+               a = s[0].replace("ftp://", "")
+               hostname = a.split("/")[0]
+
+               path = a.replace(hostname, "")
+
+               param1 = args.params[0]
+               path2 = param1
+               print(path)
+               print(path2)
+     
+     
+     #set user to anonymous if not specified by user
+     if user:
+        user = user 
+     else: 
+        user = USER
+
+     #set password too 
+     if password:
+        password = password 
+     else: 
+        password = ''
+     
+     #set port if none specified
+     if port:
+        port = port 
+     else: 
+        port = PORT
+
+     recv = ''
+     try: 
+          sock.connect((hostname, 21))
+          recv = sock.recv(4096).decode("utf-8")
+          print(recv)
+     except: 
+          print("Socket is not connected. Please check hostname or port")
+
+     if("220" in recv):
+          user = ("USER " + user + "\r\n").encode("utf-8")
+          passwords = ("PASS " + password + "\r\n").encode("utf-8")
+
+          print("sending user")
+          sock.sendall(user)
+          print(sock.recv(4096))
+
+          print("sending pass")
+          sock.send(passwords)
+          print(sock.recv(4096))
+
+          while True:
+               if command == "ls":
+                    sendPASV()
+                    listFunc(path)
+                    break
+               
+               #deletes a file from the server
+               elif command == "rm":
+                    deleteFunc(path)
+                    break
+               
+               #copying the file to the server
+               elif command == "cp":
+                    if parse(args.params[0]).scheme:
+                         sendPASV()
+                         downloadFile(path, path2)
+                         break                       
+                    else: 
+                         sendPASV()
+                         uploadFile(path, path2)
+                         break
+          
+               #copying the file from the server (downloading)
+               elif command == "mv":
+                    if parse(args.params[0]).scheme:
+                         print("here")
+                         sendPASV()
+                         moveFileFromServer(path, path2)
+                         break
+                    else:
+                         sendPASV()
+                         moveFileFromClient(path, path2)
+                         break
+               
+               #quit the program
+               elif command == "quit":
+                    quitFunc()
+                    break
+               
+               #make a new directory at the server
+               elif command == "mkdir":
+                    makeDirectory(path)
+                    break
+               
+               #delete a directory at the server
+               elif command == "rmdir":
+                    sendPASV()
+                    deleteDirectory(path)
+                    break         
+          
+               else:
+                    print("Command not recognised. PLease try Again")
+                    break
+
+     else: 
+          print("Unable to login. Please enter correct username or password")
+
+
+if __name__ == "__main__":
+    main()
